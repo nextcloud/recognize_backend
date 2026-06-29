@@ -1,0 +1,146 @@
+<?xml version="1.0"?>
+<info>
+	<id>recognize_backend</id>
+	<name>Recognize Backend</name>
+	<summary>On-premises classification of audio, images, video and faces for Nextcloud TaskProcessing.</summary>
+	<description>
+	<![CDATA[
+**Requires [`AppAPI`](https://github.com/cloud-py-api/app_api) to work.**
+
+A Nextcloud ExApp that provides TaskProcessing providers for the
+classification task types contributed by the
+[Recognize](https://github.com/nextcloud/recognize) app:
+
+* `recognize:audio:classification` — Audio Spectrogram Transformer fine-tuned on AudioSet
+* `recognize:image:classification` — ConvNeXt V2 (Large) pretrained on ImageNet-22k
+* `recognize:image:facerecognition` — InsightFace `buffalo_l` (SCRFD + ArcFace) face embeddings
+* `recognize:video:classification` — VideoMAE (Large) fine-tuned on Kinetics-400
+
+All models are loaded through their canonical Python libraries
+(Hugging Face `transformers`, `insightface`) rather than being reimplemented.
+
+## Ethical AI Rating
+### Rating: 🟡
+
+Positive:
+* the software for training and inference of all models is open source
+* the trained models are freely available, and thus can be run on-premises
+
+Negative:
+* the training data of the models is not freely available, limiting the ability of external parties to check and correct for bias or optimise the model's performance and CO2 usage.
+
+Learn more about the Nextcloud Ethical AI Rating [in our blog](https://nextcloud.com/blog/nextcloud-ethical-ai-rating/).
+	]]></description>
+	<version>1.0.0</version>
+	<licence>agpl</licence>
+	<author mail="mklehr@gmx.net" homepage="https://github.com/marcelklehr">Marcel Klehr</author>
+	<namespace>PyAppV2_recognize_backend</namespace>
+	<category>ai</category>
+	<category>tools</category>
+	<website>https://github.com/nextcloud/recognize_backend</website>
+	<bugs>https://github.com/nextcloud/recognize_backend/issues</bugs>
+	<repository type="git">https://github.com/nextcloud/recognize_backend</repository>
+	<screenshot>https://raw.githubusercontent.com/nextcloud/recognize_backend/main/img/Logo.png</screenshot>
+	<dependencies>
+		<nextcloud min-version="32" max-version="34"/>
+	</dependencies>
+	<external-app>
+		<docker-install>
+			<registry>ghcr.io</registry>
+			<image>nextcloud/recognize_backend</image>
+			<image-tag>1.0.0</image-tag>
+		</docker-install>
+		<environment-variables>
+			<variable>
+				<name>RECOGNIZE_AUDIO_MODEL</name>
+				<display-name>Audio classification model</display-name>
+				<description>Hugging Face model id for audio classification. Default: MIT/ast-finetuned-audioset-10-10-0.4593</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_IMAGE_MODEL</name>
+				<display-name>Image classification model</display-name>
+				<description>Hugging Face model id for image classification. Default: facebook/convnextv2-large-22k-384</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_VIDEO_MODEL</name>
+				<display-name>Video classification model</display-name>
+				<description>Hugging Face model id for video classification. Default: MCG-NJU/videomae-large-finetuned-kinetics</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_FACE_MODEL</name>
+				<display-name>Face recognition model pack</display-name>
+				<description>InsightFace model pack name for face recognition. Default: buffalo_l</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_AUDIO_TOP_K</name>
+				<display-name>Audio top-K</display-name>
+				<description>Maximum number of categories returned per audio file. Default: 5</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_AUDIO_THRESHOLD</name>
+				<display-name>Audio score threshold</display-name>
+				<description>Minimum probability for an audio category to be returned (float 0..1). Default: 0.2</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_MUSIC_GENRE_ENABLED</name>
+				<display-name>Enable music genre head</display-name>
+				<description>Set to 0 to skip running the music-genre classifier even when AudioSet thinks the clip is music. Default: 1</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_MUSIC_GENRE_MODEL</name>
+				<display-name>Music genre model</display-name>
+				<description>Hugging Face model id for music genre classification. Default: dima806/music_genres_classification</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_MUSIC_GENRE_TOP_K</name>
+				<display-name>Music genre top-K</display-name>
+				<description>Maximum number of genre labels concatenated onto the AudioSet labels for music clips. Default: 3</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_MUSIC_GENRE_THRESHOLD</name>
+				<display-name>Music genre score threshold</display-name>
+				<description>Minimum probability for a genre label to be appended (float 0..1). Default: 0.25</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_MUSIC_DETECTION_THRESHOLD</name>
+				<display-name>Music detection threshold</display-name>
+				<description>Minimum AudioSet probability on any "music"/"singing" label required to trigger the genre head (float 0..1). Default: 0.3</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_IMAGE_TOP_K</name>
+				<display-name>Image top-K</display-name>
+				<description>Maximum number of categories returned per image. Default: 5</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_IMAGE_THRESHOLD</name>
+				<display-name>Image score threshold</display-name>
+				<description>Minimum probability for an image category to be returned (float 0..1). Default: 0.15</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_VIDEO_TOP_K</name>
+				<display-name>Video top-K</display-name>
+				<description>Maximum number of categories returned per video. Default: 5</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_VIDEO_THRESHOLD</name>
+				<display-name>Video score threshold</display-name>
+				<description>Minimum probability for a video category to be returned (float 0..1). Default: 0.15</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_VIDEO_FRAMES</name>
+				<display-name>Video sampled frames</display-name>
+				<description>Number of evenly spaced frames sampled per video clip. Default: 16</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_FACE_DET_SIZE</name>
+				<display-name>Face detector input size</display-name>
+				<description>Square input size in pixels for the face detector. Default: 640</description>
+			</variable>
+			<variable>
+				<name>TASK_POLLING_INTERVAL</name>
+				<display-name>Task polling interval</display-name>
+				<description>Seconds between polls for new TaskProcessing jobs when idle. Default: 5</description>
+			</variable>
+		</environment-variables>
+	</external-app>
+</info>

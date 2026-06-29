@@ -1,0 +1,23 @@
+nc_py_api[app]==0.22.0
+pydantic
+python-multipart
+niquests
+requests
+# Hugging Face stack for audio/image/video classification
+transformers>=4.44,<5
+torch>=2.2
+torchaudio>=2.2
+torchvision>=0.17
+accelerate
+# Audio decoding
+librosa>=0.10
+soundfile
+# Image decoding
+Pillow>=10
+# Video decoding (PyAV ships ffmpeg)
+av>=12
+# Face detection + ArcFace embeddings
+insightface==0.7.3
+onnxruntime-gpu==1.18.1
+opencv-python-headless>=4.9
+numpy

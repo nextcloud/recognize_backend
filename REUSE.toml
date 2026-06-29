@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+version = 1
+SPDX-PackageName = "recognize_backend"
+SPDX-PackageSupplier = "2026 Nextcloud GmbH and Nextcloud contributors"
+SPDX-PackageDownloadLocation = "https://github.com/nextcloud/recognize_backend"
+
+[[annotations]]
+path = ["requirements.txt", ".gitignore", ".nextcloudignore"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Nextcloud GmbH and Nextcloud contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+[[annotations]]
+path = ["img/*"]
+SPDX-FileCopyrightText = "2026 Nextcloud GmbH and Nextcloud contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"

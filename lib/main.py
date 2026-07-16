@@ -18,7 +18,6 @@ import logging
 import os
 import threading
 import traceback
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from threading import Event
 from time import perf_counter, sleep
@@ -45,7 +44,6 @@ ENABLED = Event()
 TRIGGER = Event()
 WAIT_INTERVAL = int(os.environ.get("TASK_POLLING_INTERVAL", "5"))
 WAIT_INTERVAL_WITH_TRIGGER = 5 * 60
-DOWNLOAD_CONCURRENCY = int(os.environ.get("RECOGNIZE_DOWNLOAD_CONCURRENCY", "10"))
 
 PROCESSOR_CACHE: dict[str, callable] = {}
 PROCESSOR_LOCK = threading.Lock()
@@ -130,42 +128,27 @@ def process_task(task: dict, task_type: str) -> dict:
 
     results: list[str] = []
     total = max(1, len(file_ids))
-
-    def _download(file_id):
-        # Returns (path, error); classification stays on the main thread so we
-        # only parallelize the I/O-bound download here.
-        try:
-            return get_file(nc, task["id"], int(file_id)), None
-        except Exception as e:
-            return None, e
-
-    # Fetch all input files concurrently. Downloads are I/O-bound and the
-    # remote can serve many in parallel; classification below is CPU/GPU-bound
-    # and the model is not thread-safe, so it runs sequentially in file order.
-    workers = max(1, min(DOWNLOAD_CONCURRENCY, len(file_ids)))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        downloads = list(pool.map(_download, file_ids))
-
-    downloaded_paths = [path for path, _ in downloads if path is not None]
+    downloaded_paths: list[str] = []
     try:
-        for i, (file_id, (path, error)) in enumerate(zip(file_ids, downloads)):
-            if error is not None:
+        for i, file_id in enumerate(file_ids):
+            try:
+                path = get_file(nc, task["id"], int(file_id))
+            except Exception as e:
+                LOGGER.error("Failed to download file %s for task %s: %s", file_id, task["id"], e)
+                results.append("")
+                continue
+            downloaded_paths.append(path)
+            try:
+                results.append(processor(path))
+            except Exception as e:
                 LOGGER.error(
-                    "Failed to download file %s for task %s: %s", file_id, task["id"], error
+                    "Processor failed on file %s (task %s): %s\n%s",
+                    file_id,
+                    task["id"],
+                    e,
+                    "".join(traceback.format_exception(e)),
                 )
                 results.append("")
-            else:
-                try:
-                    results.append(processor(path))
-                except Exception as e:
-                    LOGGER.error(
-                        "Processor failed on file %s (task %s): %s\n%s",
-                        file_id,
-                        task["id"],
-                        e,
-                        "".join(traceback.format_exception(e)),
-                    )
-                    results.append("")
             try:
                 nc.providers.task_processing.set_progress(task["id"], (i + 1) / total)
             except Exception as e:

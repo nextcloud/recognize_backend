@@ -23,7 +23,7 @@ from nc_py_api.ex_app import persistent_storage
 from ._device import onnx_providers
 
 MODEL_PACK = os.environ.get("RECOGNIZE_FACE_MODEL", "buffalo_l")
-DET_SIZE = int(os.environ.get("RECOGNIZE_FACE_DET_SIZE", "640"))
+DET_SIZE = int(os.environ.get("RECOGNIZE_FACE_DET_SIZE", "1024"))
 
 PROVIDER_ID = "recognize_backend:image:facerecognition"
 PROVIDER_NAME = "Recognize Face Recognition (InsightFace ArcFace)"

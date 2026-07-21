@@ -134,7 +134,7 @@ Learn more about the Nextcloud Ethical AI Rating [in our blog](https://nextcloud
 			<variable>
 				<name>RECOGNIZE_FACE_DET_SIZE</name>
 				<display-name>Face detector input size</display-name>
-				<description>Square input size in pixels for the face detector. Default: 640</description>
+				<description>Square input size in pixels for the face detector. Default: 1024</description>
 			</variable>
 			<variable>
 				<name>TASK_POLLING_INTERVAL</name>

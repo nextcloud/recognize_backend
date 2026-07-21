@@ -58,13 +58,20 @@ def build():
     app.prepare(ctx_id=ctx_id, det_size=(DET_SIZE, DET_SIZE))
 
     def run(path: str) -> str:
-        img = cv2.imread(path)
-        if img is None:
-            from PIL import Image
+        # Load via PIL so we can honor the EXIF orientation tag; cv2.imread
+        # ignores it, which would flip/rotate bounding boxes on phone photos.
+        img = None
+        try:
+            from PIL import Image, ImageOps
             import numpy as np
 
             with Image.open(path) as pil:
-                img = cv2.cvtColor(np.array(pil.convert("RGB")), cv2.COLOR_RGB2BGR)
+                pil = ImageOps.exif_transpose(pil).convert("RGB")
+                img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+        except Exception:
+            img = None
+        if img is None:
+            img = cv2.imread(path)
         faces = app.get(img)
         lines = []
         for face in faces:

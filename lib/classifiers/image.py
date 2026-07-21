@@ -29,7 +29,7 @@ def _clean_label(label: str) -> str:
 
 
 def build():
-    from PIL import Image
+    from PIL import Image, ImageOps
     from transformers import pipeline
 
     device = torch_device()
@@ -41,7 +41,9 @@ def build():
 
     def run(path: str) -> str:
         with Image.open(path) as img:
-            img = img.convert("RGB")
+            # Honor the EXIF orientation tag so rotated photos are
+            # classified upright rather than sideways.
+            img = ImageOps.exif_transpose(img).convert("RGB")
             predictions = classifier(img, top_k=TOP_K)
         labels = [
             _clean_label(p["label"])

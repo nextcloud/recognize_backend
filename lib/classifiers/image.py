@@ -15,7 +15,7 @@ DEFAULT_MODEL = os.environ.get(
     "RECOGNIZE_IMAGE_MODEL", "facebook/convnextv2-large-22k-384"
 )
 TOP_K = int(os.environ.get("RECOGNIZE_IMAGE_TOP_K", "50"))
-SCORE_THRESHOLD = float(os.environ.get("RECOGNIZE_IMAGE_THRESHOLD", "0.35"))
+SCORE_THRESHOLD = float(os.environ.get("RECOGNIZE_IMAGE_THRESHOLD", "0.5"))
 
 PROVIDER_ID = "recognize_backend:image:classification"
 PROVIDER_NAME = "Recognize Image Classification (ConvNeXt V2)"

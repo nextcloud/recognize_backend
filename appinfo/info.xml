@@ -35,7 +35,7 @@ Negative:
 
 Learn more about the Nextcloud Ethical AI Rating [in our blog](https://nextcloud.com/blog/nextcloud-ethical-ai-rating/).
 	]]></description>
-	<version>1.0.2</version>
+	<version>1.0.3</version>
 	<licence>agpl</licence>
 	<author mail="mklehr@gmx.net" homepage="https://github.com/marcelklehr">Marcel Klehr</author>
 	<namespace>PyAppV2_recognize_backend</namespace>
@@ -46,13 +46,13 @@ Learn more about the Nextcloud Ethical AI Rating [in our blog](https://nextcloud
 	<repository type="git">https://github.com/nextcloud/recognize_backend</repository>
 	<screenshot>https://raw.githubusercontent.com/nextcloud/recognize_backend/main/img/Logo.png</screenshot>
 	<dependencies>
-		<nextcloud min-version="32" max-version="35"/>
+		<nextcloud min-version="35" max-version="35"/>
 	</dependencies>
 	<external-app>
 		<docker-install>
 			<registry>ghcr.io</registry>
 			<image>nextcloud/recognize_backend</image>
-			<image-tag>1.0.2</image-tag>
+			<image-tag>1.0.3</image-tag>
 		</docker-install>
 		<environment-variables>
 			<variable>

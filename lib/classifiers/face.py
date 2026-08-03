@@ -72,6 +72,8 @@ def build():
             img = None
         if img is None:
             img = cv2.imread(path)
+        if img is None:
+            return ""
         faces = app.get(img)
         lines = []
         for face in faces:

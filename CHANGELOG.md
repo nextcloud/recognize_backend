@@ -5,6 +5,13 @@
 
 # Changelog
 
+## [1.0.4] - 2026-08-06
+
+### Fixed
+
+- fix(face): Harden against non-loadable images
+
+
 ## [1.0.3] - 2026-07-27
 
 ### Fixed

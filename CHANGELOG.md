@@ -5,6 +5,17 @@
 
 # Changelog
 
+## [1.0.6] - 2026-10-20
+
+### Fixed
+- Build: Use CUDA 12.8 + cuDNN 9 base image and onnxruntime-gpu 1.22 so face recognition actually runs on the GPU
+
+## [1.0.5] - 2026-09-26
+
+### Fixed
+
+- Fix: Reduce default face detection photo size back to 640
+
 ## [1.0.4] - 2026-08-06
 
 ### Fixed

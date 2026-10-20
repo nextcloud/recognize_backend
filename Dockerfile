@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
-FROM nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PIP_NO_CACHE_DIR=1
@@ -37,9 +37,16 @@ COPY --chmod=775 start.sh /
 
 ADD li[b] /app/lib
 
-RUN python3 -m pip install --upgrade pip \
- && python3 -m pip install -r /requirements.txt \
- && rm -rf /root/.cache /requirements.txt
+# insightface ships an sdist only and compiles a Cython extension, so a C/C++
+# toolchain is needed at install time. The runtime base image has none; install
+# it for the pip step and drop it again in the same layer.
+RUN set -ex; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends build-essential; \
+    python3 -m pip install --upgrade pip; \
+    python3 -m pip install -r /requirements.txt; \
+    apt-get purge -y --auto-remove build-essential; \
+    rm -rf /var/lib/apt/lists/* /root/.cache /requirements.txt
 
 WORKDIR /app/lib
 ENTRYPOINT ["/start.sh", "python3", "main.py"]

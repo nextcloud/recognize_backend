@@ -9,9 +9,13 @@ niquests
 requests
 # Hugging Face stack for audio/image/video classification
 transformers>=4.44,<5
-torch>=2.2
-torchaudio>=2.2
-torchvision>=0.17
+# PyTorch CUDA 12.8 builds, pinned via the local version tag so the extra index
+# is unambiguous. Unpinned, torch resolves to >=2.9, which ships nvidia-*-cu13
+# wheels and needs an r580+ driver.
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.8.0+cu128
+torchaudio==2.8.0+cu128
+torchvision==0.23.0+cu128
 accelerate
 # Audio decoding
 librosa>=0.10
@@ -22,6 +26,9 @@ Pillow>=10
 av>=12
 # Face detection + ArcFace embeddings
 insightface==0.7.3
-onnxruntime-gpu==1.18.1
+# CUDA 12.x + cuDNN 9 build. 1.18.1 on PyPI is the CUDA 11.8 build, whose
+# CUDAExecutionProvider cannot load against a CUDA 12 image and silently
+# falls back to CPU.
+onnxruntime-gpu==1.22.0
 opencv-python-headless>=4.9
 numpy

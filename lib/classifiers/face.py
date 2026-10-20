@@ -15,6 +15,7 @@ eye keypoints (positive = right eye below left eye).
 """
 
 import json
+import logging
 import math
 import os
 
@@ -28,6 +29,8 @@ DET_SIZE = int(os.environ.get("RECOGNIZE_FACE_DET_SIZE", "640"))
 PROVIDER_ID = "recognize_backend:image:facerecognition"
 PROVIDER_NAME = "Recognize Face Recognition (InsightFace ArcFace)"
 EXPECTED_RUNTIME = 15
+
+LOGGER = logging.getLogger(os.environ.get("APP_ID", "recognize_backend"))
 
 
 def _roll_angle(kps) -> float:
@@ -56,6 +59,12 @@ def build():
     )
     ctx_id = 0 if "CUDAExecutionProvider" in providers else -1
     app.prepare(ctx_id=ctx_id, det_size=(DET_SIZE, DET_SIZE))
+    # onnxruntime only logs a warning and drops to CPU when the CUDA provider
+    # cannot be loaded (e.g. CUDA/cuDNN mismatch), so surface that explicitly.
+    for task, model in app.models.items():
+        active = model.session.get_providers()
+        if "CUDAExecutionProvider" in providers and "CUDAExecutionProvider" not in active:
+            LOGGER.warning("Face %s model is running on %s instead of CUDA", task, active)
 
     def run(path: str) -> str:
         # Load via PIL so we can honor the EXIF orientation tag; cv2.imread

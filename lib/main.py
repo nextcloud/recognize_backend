@@ -44,6 +44,9 @@ ENABLED = Event()
 TRIGGER = Event()
 WAIT_INTERVAL = int(os.environ.get("TASK_POLLING_INTERVAL", "5"))
 WAIT_INTERVAL_WITH_TRIGGER = 5 * 60
+# How long to keep retrying to deliver a finished task's result before giving up.
+REPORT_RESULT_DEADLINE = 60 * 60
+RETRY_BACKOFF_MAX = 60
 
 PROCESSOR_CACHE: dict[str, callable] = {}
 PROCESSOR_LOCK = threading.Lock()
@@ -150,7 +153,8 @@ def process_task(task: dict, task_type: str) -> dict:
                 )
                 results.append("")
             try:
-                nc.providers.task_processing.set_progress(task["id"], (i + 1) / total)
+                # nc_py_api expects a percentage (0-100)
+                nc.providers.task_processing.set_progress(task["id"], (i + 1) / total * 100)
             except Exception as e:
                 LOGGER.warning("Failed to report progress for task %s: %s", task["id"], e)
     finally:
@@ -161,6 +165,63 @@ def process_task(task: dict, task_type: str) -> dict:
                 pass
 
     return {"output": results}
+
+
+def _is_transient(e: Exception) -> bool:
+    if isinstance(e, (niquests.exceptions.ConnectionError, niquests.exceptions.Timeout)):
+        return True
+    if isinstance(e, NextcloudException):
+        return e.status_code == 408 or e.status_code >= 500
+    return False
+
+
+def report_result(nc: NextcloudApp, task_id: int, output: dict | None = None, error: str | None = None) -> None:
+    """Deliver a task result, retrying transient failures.
+
+    nc_py_api's ``report_result`` swallows HTTP errors, and a lost result leaves
+    the task in STATUS_RUNNING forever, so we call the endpoint directly and keep
+    retrying while Nextcloud is unreachable or returns a server error.
+    """
+    deadline = perf_counter() + REPORT_RESULT_DEADLINE
+    delay = 2
+    while True:
+        try:
+            nc._session.ocs(
+                "POST",
+                f"/ocs/v2.php/taskprocessing/tasks_provider/{task_id}/result",
+                json={"taskId": task_id, "output": output, "errorMessage": error},
+            )
+            return
+        except Exception as e:
+            if not _is_transient(e):
+                LOGGER.error("Failed to report result for task %s, giving up: %s", task_id, e)
+                return
+            if perf_counter() + delay > deadline:
+                LOGGER.error("Failed to report result for task %s, retries exhausted: %s", task_id, e)
+                return
+            LOGGER.warning("Failed to report result for task %s, retrying in %ds: %s", task_id, delay, e)
+            sleep(delay)
+            delay = min(delay * 2, RETRY_BACKOFF_MAX)
+
+
+def wait_for_initial_enabled_state(nc: NextcloudApp) -> None:
+    """Fetch the enabled state, retrying until Nextcloud is reachable.
+
+    ``nc.enabled_state`` returns False when Nextcloud cannot be reached, and
+    AppAPI only calls the enabled handler on (re-)enable, not on a container
+    restart. If the container starts before Nextcloud or HaRP (e.g. after a host
+    reboot), trusting that False would leave the worker idle forever.
+    """
+    delay = 2
+    while not ENABLED.is_set():
+        try:
+            if nc._session.ocs("GET", "/ocs/v1.php/apps/app_api/ex-app/state"):
+                ENABLED.set()
+            return
+        except Exception as e:
+            LOGGER.info("Nextcloud not reachable yet, retrying in %ds: %s", delay, e)
+            sleep(delay)
+            delay = min(delay * 2, RETRY_BACKOFF_MAX)
 
 
 def wait_for_task(interval=None):
@@ -176,6 +237,8 @@ def background_thread_task():
     nc = NextcloudApp()
     provider_ids = [TASK_TYPES[t].PROVIDER_ID for t in TASK_TYPES]
     task_type_ids = list(TASK_TYPES.keys())
+
+    wait_for_initial_enabled_state(nc)
 
     while True:
         while not ENABLED.is_set():
@@ -207,12 +270,7 @@ def background_thread_task():
                 task_type = tt
                 break
         if task_type is None:
-            try:
-                nc.providers.task_processing.report_result(
-                    task["id"], None, f"Unknown provider: {provider_id}"
-                )
-            except Exception:
-                pass
+            report_result(nc, task["id"], error=f"Unknown provider: {provider_id}")
             continue
 
         try:
@@ -220,13 +278,11 @@ def background_thread_task():
             time_start = perf_counter()
             output = process_task(task, task_type)
             LOGGER.info("Task %s done in %.2fs", task["id"], perf_counter() - time_start)
-            nc.providers.task_processing.report_result(task["id"], output)
         except Exception as e:
             LOGGER.error("%s\n%s", e, "".join(traceback.format_exception(e)))
-            try:
-                nc.providers.task_processing.report_result(task["id"], None, str(e))
-            except Exception:
-                pass
+            report_result(nc, task["id"], error=str(e))
+            continue
+        report_result(nc, task["id"], output)
 
 
 def start_bg_task():
@@ -241,9 +297,6 @@ async def lifespan(_app: FastAPI):
         logging_level=logging.WARNING,
     )
     set_handlers(APP, enabled_handler, trigger_handler=trigger_handler)
-    nc = NextcloudApp()
-    if nc.enabled_state:
-        ENABLED.set()
     start_bg_task()
     yield
 

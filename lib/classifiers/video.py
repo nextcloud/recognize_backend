@@ -12,6 +12,7 @@ import os
 import numpy as np
 
 from ._device import torch_device
+from ._processor import Processor
 
 DEFAULT_MODEL = os.environ.get(
     "RECOGNIZE_VIDEO_MODEL", "MCG-NJU/videomae-large-finetuned-kinetics"
@@ -82,7 +83,7 @@ def _read_frames(path: str, num_samples: int) -> np.ndarray:
     return np.stack(out[:num_samples], axis=0)
 
 
-def build():
+def build() -> Processor:
     import torch
     from transformers import VideoMAEForVideoClassification, VideoMAEImageProcessor
 
@@ -94,8 +95,7 @@ def build():
     id2label = model.config.id2label
 
     @torch.no_grad()
-    def run(path: str) -> str:
-        frames = _read_frames(path, NUM_FRAMES)
+    def run(frames: np.ndarray) -> str:
         # transformers expects a list of frames per video; pass list-of-arrays.
         inputs = processor(list(frames), return_tensors="pt")
         inputs = {k: v.to(device) for k, v in inputs.items()}
@@ -116,4 +116,9 @@ def build():
                 uniq.append(label)
         return ", ".join(uniq)
 
-    return run
+    # Sampled clips are large (NUM_FRAMES full-resolution frames), so videos
+    # are classified one at a time.
+    return Processor(
+        load=lambda path: _read_frames(path, NUM_FRAMES),
+        infer=lambda clips: [run(frames) for frames in clips],
+    )

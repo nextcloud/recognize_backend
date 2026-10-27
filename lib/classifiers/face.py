@@ -21,10 +21,19 @@ import os
 
 from nc_py_api.ex_app import persistent_storage
 
-from ._device import onnx_providers
+from ._device import batch_size_for, onnx_providers
+from ._processor import Processor
 
 MODEL_PACK = os.environ.get("RECOGNIZE_FACE_MODEL", "buffalo_l")
 DET_SIZE = int(os.environ.get("RECOGNIZE_FACE_DET_SIZE", "640"))
+# JPEGs are decoded at a reduced DCT scale (1/2, 1/4, 1/8) as long as the long
+# side stays at least this large, which is much cheaper than a full decode.
+DECODE_SIZE = int(os.environ.get("RECOGNIZE_FACE_DECODE_SIZE", "1600"))
+# Detection runs per image (det_10g has a fixed batch dimension of 1), so this
+# mostly sizes the ArcFace batches, which hold every face of a batch of images.
+VRAM_PER_IMAGE = 96 * 1024 ** 2
+MAX_BATCH_SIZE = 16
+MAX_EMBED_BATCH = 64
 
 PROVIDER_ID = "recognize_backend:image:facerecognition"
 PROVIDER_NAME = "Recognize Face Recognition (InsightFace ArcFace)"
@@ -43,9 +52,32 @@ def _roll_angle(kps) -> float:
     return math.degrees(math.atan2(dy, dx))
 
 
-def build():
+def _decode(path: str):
+    """Decode an image as a BGR array, or return None if it can't be read."""
     import cv2
+
+    # Load via PIL so we can honor the EXIF orientation tag; cv2.imread
+    # ignores it, which would flip/rotate bounding boxes on phone photos.
+    try:
+        from PIL import Image, ImageOps
+        import numpy as np
+
+        with Image.open(path) as pil:
+            w, h = pil.size
+            scale = DECODE_SIZE / max(w, h)
+            if scale < 1:
+                # No-op for non-JPEG formats
+                pil.draft("RGB", (math.ceil(w * scale), math.ceil(h * scale)))
+            pil = ImageOps.exif_transpose(pil).convert("RGB")
+            return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+    except Exception:
+        return cv2.imread(path)
+
+
+def build() -> Processor:
+    import numpy as np
     from insightface.app import FaceAnalysis
+    from insightface.utils import face_align
 
     root = os.path.join(persistent_storage(), "insightface")
     os.makedirs(root, exist_ok=True)
@@ -65,45 +97,60 @@ def build():
         active = model.session.get_providers()
         if "CUDAExecutionProvider" in providers and "CUDAExecutionProvider" not in active:
             LOGGER.warning("Face %s model is running on %s instead of CUDA", task, active)
+    detector = app.det_model
+    recognizer = app.models["recognition"]
 
-    def run(path: str) -> str:
-        # Load via PIL so we can honor the EXIF orientation tag; cv2.imread
-        # ignores it, which would flip/rotate bounding boxes on phone photos.
-        img = None
-        try:
-            from PIL import Image, ImageOps
-            import numpy as np
+    def embed(crops: list) -> list:
+        embeddings = []
+        for i in range(0, len(crops), MAX_EMBED_BATCH):
+            embeddings.extend(recognizer.get_feat(crops[i:i + MAX_EMBED_BATCH]))
+        return [e / np.linalg.norm(e) for e in embeddings]
 
-            with Image.open(path) as pil:
-                pil = ImageOps.exif_transpose(pil).convert("RGB")
-                img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
-        except Exception:
-            img = None
-        if img is None:
-            img = cv2.imread(path)
-        if img is None:
-            return ""
-        faces = app.get(img)
-        lines = []
-        for face in faces:
-            embedding = face.normed_embedding
-            if embedding is None:
+    def infer(imgs: list) -> list[str]:
+        # Detect per image, then embed all faces of the batch at once.
+        detections = []
+        crops = []
+        for img in imgs:
+            if img is None:
+                detections.append([])
                 continue
-            x1, y1, x2, y2 = (float(v) for v in face.bbox)
-            h, w = img.shape[:2]
-            lines.append(
-                json.dumps(
-                    {
-                        "x": x1 / w,
-                        "y": y1 / h,
-                        "width": (x2 - x1) / w,
-                        "height": (y2 - y1) / h,
-                        "score": float(face.det_score),
-                        "angle": _roll_angle(face.kps),
-                        "vector": [float(v) for v in embedding],
-                    }
+            bboxes, kpss = detector.detect(img, max_num=0, metric="default")
+            faces = []
+            for i in range(bboxes.shape[0]):
+                if kpss is None:
+                    continue
+                faces.append((bboxes[i], kpss[i]))
+                crops.append(
+                    face_align.norm_crop(img, landmark=kpss[i], image_size=recognizer.input_size[0])
                 )
-            )
-        return "\n".join(lines)
+            detections.append(faces)
+        embeddings = iter(embed(crops))
 
-    return run
+        results = []
+        for img, faces in zip(imgs, detections):
+            lines = []
+            for bbox, kps in faces:
+                embedding = next(embeddings)
+                x1, y1, x2, y2 = (float(v) for v in bbox[:4])
+                h, w = img.shape[:2]
+                lines.append(
+                    json.dumps(
+                        {
+                            "x": x1 / w,
+                            "y": y1 / h,
+                            "width": (x2 - x1) / w,
+                            "height": (y2 - y1) / h,
+                            "score": float(bbox[4]),
+                            "angle": _roll_angle(kps),
+                            "vector": [float(v) for v in embedding],
+                        }
+                    )
+                )
+            results.append("\n".join(lines))
+        return results
+
+    return Processor(
+        load=_decode,
+        infer=infer,
+        batch_size=batch_size_for(VRAM_PER_IMAGE, MAX_BATCH_SIZE),
+    )

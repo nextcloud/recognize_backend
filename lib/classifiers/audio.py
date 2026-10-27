@@ -17,6 +17,7 @@ model entirely for non-music audio.
 import os
 
 from ._device import torch_device
+from ._processor import Processor
 
 DEFAULT_MODEL = os.environ.get(
     "RECOGNIZE_AUDIO_MODEL", "MIT/ast-finetuned-audioset-10-10-0.4593"
@@ -51,7 +52,7 @@ def _is_music(predictions) -> bool:
     return False
 
 
-def build():
+def build() -> Processor:
     from transformers import pipeline
 
     device = torch_device()
@@ -92,8 +93,7 @@ def build():
         wav, _ = librosa.load(path, sr=TARGET_SAMPLE_RATE, mono=True)
         return wav
 
-    def run(path: str) -> str:
-        wav = _load(path)
+    def run(wav) -> str:
         # Pull a few extra predictions so we can detect music even when the
         # user-facing TOP_K is small.
         detect_k = max(TOP_K, 10)
@@ -133,4 +133,6 @@ def build():
                 uniq.append(label)
         return ", ".join(uniq)
 
-    return run
+    # Clips vary in length and the genre head only runs on music, so audio is
+    # classified one file at a time.
+    return Processor(load=_load, infer=lambda wavs: [run(wav) for wav in wavs])

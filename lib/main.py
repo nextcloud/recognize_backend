@@ -16,6 +16,7 @@ process lifetime. The polling loop mirrors stt_whisper2.
 
 import logging
 import os
+import queue
 import threading
 import traceback
 from contextlib import asynccontextmanager
@@ -29,7 +30,7 @@ from nc_py_api.ex_app import run_app, set_handlers, setup_nextcloud_logging
 from nc_py_api.ex_app.providers.task_processing import TaskProcessingProvider
 
 from classifiers import TASK_TYPES
-from classifiers._device import force_cpu, is_cuda_runtime_error, torch_device
+from classifiers._device import force_cpu, is_cuda_oom, is_cuda_runtime_error, torch_device
 from ocs import get_file
 
 logging.basicConfig(
@@ -48,7 +49,10 @@ WAIT_INTERVAL_WITH_TRIGGER = 5 * 60
 REPORT_RESULT_DEADLINE = 60 * 60
 RETRY_BACKOFF_MAX = 60
 
-PROCESSOR_CACHE: dict[str, callable] = {}
+# Report task progress at most this often (seconds).
+PROGRESS_INTERVAL = 5
+
+PROCESSOR_CACHE: dict[str, "Runner"] = {}
 PROCESSOR_LOCK = threading.Lock()
 
 
@@ -64,51 +68,76 @@ def _free_cuda_cache() -> None:
         pass
 
 
-def _build_with_fallback(task_type: str):
-    """Build the processor and wrap it so CUDA failures fall back to CPU.
+class Runner:
+    """A task type's processor, with CUDA out-of-memory back-off and CPU fallback.
 
-    On the first CUDA/cuDNN runtime error observed during inference we:
+    When a batch runs out of GPU memory, the batch size is halved and the batch
+    retried. On the first other CUDA/cuDNN runtime error we:
 
     * call :func:`force_cpu` so every subsequent model build stays on CPU,
     * free the CUDA allocator cache,
     * rebuild this task's processor on CPU,
-    * retry the same input once.
-
-    Subsequent calls go straight to the CPU processor.
+    * retry the same batch once.
     """
-    module = TASK_TYPES[task_type]
-    built_on = torch_device()
-    LOGGER.info("Loading %s processor (%s) on %s", task_type, _model_name(module), built_on)
-    state = {"fn": module.build(), "device": built_on}
 
-    def run(path: str) -> str:
-        try:
-            return state["fn"](path)
-        except Exception as e:
-            if state["device"] != "cuda" or not is_cuda_runtime_error(e):
-                raise
-            LOGGER.warning(
-                "CUDA runtime error in %s, switching to CPU permanently: %s",
-                task_type,
-                e,
-            )
+    def __init__(self, task_type: str):
+        self.task_type = task_type
+        self.module = TASK_TYPES[task_type]
+        self._build()
+
+    def _build(self) -> None:
+        self.device = torch_device()
+        LOGGER.info(
+            "Loading %s processor (%s) on %s", self.task_type, _model_name(self.module), self.device
+        )
+        self.processor = self.module.build()
+        LOGGER.info("Using batch size %d for %s", self.processor.batch_size, self.task_type)
+
+    @property
+    def batch_size(self) -> int:
+        return self.processor.batch_size
+
+    def load(self, path: str):
+        return self.processor.load(path)
+
+    def infer(self, items: list) -> list[str]:
+        results: list[str] = []
+        while len(results) < len(items):
+            chunk = items[len(results):len(results) + self.processor.batch_size]
+            try:
+                results.extend(self.processor.infer(chunk))
+                continue
+            except Exception as e:
+                if self.device != "cuda":
+                    raise
+                if is_cuda_oom(e) and self.processor.batch_size > 1:
+                    self.processor.batch_size = max(1, self.processor.batch_size // 2)
+                    LOGGER.warning(
+                        "Out of GPU memory in %s, reducing batch size to %d",
+                        self.task_type,
+                        self.processor.batch_size,
+                    )
+                    _free_cuda_cache()
+                    continue
+                if not is_cuda_runtime_error(e):
+                    raise
+                LOGGER.warning(
+                    "CUDA runtime error in %s, switching to CPU permanently: %s",
+                    self.task_type,
+                    e,
+                )
             force_cpu()
             _free_cuda_cache()
-            state["fn"] = module.build()
-            state["device"] = "cpu"
-            return state["fn"](path)
-
-    return run
+            self._build()
+        return results
 
 
-def get_processor(task_type: str):
+def get_processor(task_type: str) -> Runner:
     """Lazy-load and memoise the processor for a task type."""
     with PROCESSOR_LOCK:
-        if task_type in PROCESSOR_CACHE:
-            return PROCESSOR_CACHE[task_type]
-        processor = _build_with_fallback(task_type)
-        PROCESSOR_CACHE[task_type] = processor
-        return processor
+        if task_type not in PROCESSOR_CACHE:
+            PROCESSOR_CACHE[task_type] = Runner(task_type)
+        return PROCESSOR_CACHE[task_type]
 
 
 def provider_for(task_type: str) -> TaskProcessingProvider:
@@ -121,48 +150,126 @@ def provider_for(task_type: str) -> TaskProcessingProvider:
     )
 
 
+def _load_files(task_id: int, file_ids: list, runner: Runner, out: queue.Queue, stop: Event) -> None:
+    """Download and decode the task's files in order, feeding ``(index, item)`` into ``out``.
+
+    ``item`` is None if the file could not be downloaded or decoded. A final
+    None marks the end. Runs in its own thread so downloads and decoding
+    overlap with inference.
+    """
+    nc = NextcloudApp()
+
+    def put(entry) -> bool:
+        while not stop.is_set():
+            try:
+                out.put(entry, timeout=1)
+                return True
+            except queue.Full:
+                pass
+        return False
+
+    try:
+        for i, file_id in enumerate(file_ids):
+            if stop.is_set():
+                return
+            item = None
+            try:
+                path = get_file(nc, task_id, int(file_id))
+            except Exception as e:
+                LOGGER.error("Failed to download file %s for task %s: %s", file_id, task_id, e)
+            else:
+                try:
+                    item = runner.load(path)
+                except Exception as e:
+                    LOGGER.error("Failed to load file %s for task %s: %s", file_id, task_id, e)
+                finally:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+            if not put((i, item)):
+                return
+    finally:
+        put(None)
+
+
+def _infer_batch(runner: Runner, batch: list, file_ids: list, task_id: int) -> list[str]:
+    """Run inference on ``[(index, item), ...]``; isolate failures to single files."""
+    items = [item for _, item in batch]
+    try:
+        return runner.infer(items)
+    except Exception as e:
+        if len(batch) > 1:
+            LOGGER.warning("Batch failed for task %s, retrying files one by one: %s", task_id, e)
+    results = []
+    for i, item in batch:
+        try:
+            results.extend(runner.infer([item]))
+        except Exception as e:
+            LOGGER.error(
+                "Processor failed on file %s (task %s): %s\n%s",
+                file_ids[i],
+                task_id,
+                e,
+                "".join(traceback.format_exception(e)),
+            )
+            results.append("")
+    return results
+
+
 def process_task(task: dict, task_type: str) -> dict:
     """Run a task: download every input file, classify, return ``{"output": [...]}``."""
     nc = NextcloudApp()
-    processor = get_processor(task_type)
+    runner = get_processor(task_type)
     file_ids = task.get("input", {}).get("input")
     if not isinstance(file_ids, list):
         raise ValueError(f"Unexpected input shape: {task.get('input')!r}")
 
-    results: list[str] = []
+    results = [""] * len(file_ids)
     total = max(1, len(file_ids))
-    downloaded_paths: list[str] = []
+    done = 0
+    last_progress = perf_counter()
+    # Holds up to one batch of loaded items while the previous one is inferred.
+    loaded: queue.Queue = queue.Queue(maxsize=runner.batch_size)
+    stop = Event()
+    loader = threading.Thread(
+        target=_load_files, args=(task["id"], file_ids, runner, loaded, stop), daemon=True
+    )
+    loader.start()
     try:
-        for i, file_id in enumerate(file_ids):
-            try:
-                path = get_file(nc, task["id"], int(file_id))
-            except Exception as e:
-                LOGGER.error("Failed to download file %s for task %s: %s", file_id, task["id"], e)
-                results.append("")
-                continue
-            downloaded_paths.append(path)
-            try:
-                results.append(processor(path))
-            except Exception as e:
-                LOGGER.error(
-                    "Processor failed on file %s (task %s): %s\n%s",
-                    file_id,
-                    task["id"],
-                    e,
-                    "".join(traceback.format_exception(e)),
-                )
-                results.append("")
-            try:
-                # nc_py_api expects a percentage (0-100)
-                nc.providers.task_processing.set_progress(task["id"], (i + 1) / total * 100)
-            except Exception as e:
-                LOGGER.warning("Failed to report progress for task %s: %s", task["id"], e)
+        finished = False
+        while not finished:
+            # Block for the next item, then take whatever else is ready up to
+            # the batch size, so the GPU never idles waiting for a full batch.
+            batch = []
+            entry = loaded.get()
+            while True:
+                if entry is None:
+                    finished = True
+                    break
+                i, item = entry
+                done += 1
+                if item is not None:
+                    batch.append((i, item))
+                if len(batch) >= runner.batch_size:
+                    break
+                try:
+                    entry = loaded.get_nowait()
+                except queue.Empty:
+                    break
+            if batch:
+                for (i, _), output in zip(batch, _infer_batch(runner, batch, file_ids, task["id"])):
+                    results[i] = output
+            if not finished and perf_counter() - last_progress >= PROGRESS_INTERVAL:
+                last_progress = perf_counter()
+                try:
+                    # nc_py_api expects a percentage (0-100)
+                    nc.providers.task_processing.set_progress(task["id"], done / total * 100)
+                except Exception as e:
+                    LOGGER.warning("Failed to report progress for task %s: %s", task["id"], e)
     finally:
-        for path in downloaded_paths:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+        stop.set()
+        loader.join()
 
     return {"output": results}
 

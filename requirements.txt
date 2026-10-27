@@ -20,6 +20,8 @@ accelerate
 # Audio decoding
 librosa>=0.10
 soundfile
+# ImageNet tag rules
+pyyaml
 # Image decoding
 Pillow>=10
 # Video decoding (PyAV ships ffmpeg)

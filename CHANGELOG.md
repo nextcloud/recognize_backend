@@ -5,6 +5,15 @@
 
 # Changelog
 
+## [1.1.0] - 2026-10-28
+
+#### Added
+- enh: use imagenet rules from old recognize code base to improve object detection and classification
+
+### Fixed
+- perf: Enhance throughput
+- fix: Retry task result reporting and recover from reboot
+
 ## [1.0.6] - 2026-10-20
 
 ### Fixed

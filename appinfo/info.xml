@@ -113,12 +113,17 @@ Learn more about the Nextcloud Ethical AI Rating [in our blog](https://nextcloud
 			<variable>
 				<name>RECOGNIZE_IMAGE_TOP_K</name>
 				<display-name>Image top-K</display-name>
-				<description>Maximum number of categories returned per image. Default: 5</description>
+				<description>Number of top predictions considered per image. Default: 7</description>
 			</variable>
 			<variable>
 				<name>RECOGNIZE_IMAGE_THRESHOLD</name>
 				<display-name>Image score threshold</display-name>
-				<description>Minimum probability for an image category to be returned (float 0..1). Default: 0.15</description>
+				<description>Minimum probability for an image category to be returned (float 0..1). Only used for models whose labels are not covered by the ImageNet tag rules. Default: 0.5</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_IMAGE_TEMPERATURE</name>
+				<display-name>Image logit temperature</display-name>
+				<description>Logits are divided by this value before softmax so that probabilities match the thresholds of the ImageNet tag rules. Lower values yield more tags. Default: 0.8 for facebook/convnextv2-large-22k-384, 1.0 for any other model</description>
 			</variable>
 			<variable>
 				<name>RECOGNIZE_VIDEO_TOP_K</name>
@@ -139,6 +144,21 @@ Learn more about the Nextcloud Ethical AI Rating [in our blog](https://nextcloud
 				<name>RECOGNIZE_FACE_DET_SIZE</name>
 				<display-name>Face detector input size</display-name>
 				<description>Square input size in pixels for the face detector. Default: 640</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_FACE_DECODE_SIZE</name>
+				<display-name>Face image decode size</display-name>
+				<description>JPEGs are decoded at a reduced scale as long as their long side stays at least this many pixels. Default: 1600</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_BATCH_SIZE</name>
+				<display-name>Inference batch size</display-name>
+				<description>Overrides the inference batch size of all classifiers. Default: derived from free VRAM on GPU, 1 on CPU</description>
+			</variable>
+			<variable>
+				<name>RECOGNIZE_VRAM_BUDGET</name>
+				<display-name>VRAM budget</display-name>
+				<description>Fraction of the currently free VRAM that inference batches may use (float 0..1). Default: 0.5</description>
 			</variable>
 			<variable>
 				<name>TASK_POLLING_INTERVAL</name>
